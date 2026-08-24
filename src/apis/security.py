@@ -7,10 +7,6 @@ from jose import JWTError, jwt
 from config import get_settings
 
 JWT_ALGORITHM = "HS256"
-# Scopes what a trusted-secret token (e.g. future Infollion SSO) is allowed to
-# assert here - without this, a leak of a *partner's* signing secret would be
-# just as good as leaking this service's own, since any correctly-signed
-# token would otherwise be accepted regardless of which secret validated it.
 JWT_AUDIENCE = "syndicate-transcript-backend"
 PENDING_VERIFICATION_PURPOSE = "email_verification"
 PENDING_VERIFICATION_EXPIRY_MINUTES = 15
@@ -25,7 +21,12 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str | None) -> bool:
     if not password_hash:
         return False
-    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        # bcrypt>=4.0 raises instead of truncating for passwords over 72 bytes -
+        # treat as a non-match rather than a 500, same as any other wrong password.
+        return False
 
 
 def create_access_token(*, user_id: uuid.UUID, user_name: str, email: str) -> str:
@@ -43,18 +44,11 @@ def create_access_token(*, user_id: uuid.UUID, user_name: str, email: str) -> st
 
 
 def decode_access_token(token: str) -> dict | None:
-    # Tries this service's own secret, then any trusted secrets (e.g. Infollion
-    # SSO). The audience check applies to every secret tried, including our
-    # own, so a trusted-secret token has to have been deliberately minted for
-    # this service rather than merely signed with a valid key.
     settings = get_settings()
-    secrets_to_try = [settings.auth.jwt_secret, *settings.auth.trusted_jwt_secrets]
-    for secret in secrets_to_try:
-        try:
-            return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM], audience=JWT_AUDIENCE)
-        except JWTError:
-            continue
-    return None
+    try:
+        return jwt.decode(token, settings.auth.jwt_secret, algorithms=[JWT_ALGORITHM], audience=JWT_AUDIENCE)
+    except JWTError:
+        return None
 
 
 def _create_purpose_token(*, purpose: str, expiry_minutes: int, user_id: uuid.UUID) -> str:

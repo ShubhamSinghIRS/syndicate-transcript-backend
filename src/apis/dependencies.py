@@ -34,6 +34,11 @@ def get_current_user_id_optional(request: Request) -> uuid.UUID | None:
     return uuid.UUID(user_id) if user_id else None
 
 
+def get_current_user_email(request: Request) -> str | None:
+    """Email claim from the JWT, attached by the JWT middleware."""
+    return getattr(request.state, "email", None)
+
+
 _orders_controller: OrdersController | None = None
 
 

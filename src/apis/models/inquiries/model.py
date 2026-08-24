@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from services.crypto.email_crypto import decrypt_email, encrypt_email, hash_email
@@ -54,7 +54,7 @@ class TopicRequest(Base):
     name = Column(String, nullable=True)
     email_encrypted = Column(String, nullable=True)
     email_hash = Column(String, nullable=True)
-    domain = Column(String, nullable=False)
+    domains = Column(ARRAY(String), nullable=False)
     topic = Column(String, nullable=True)
     remark = Column(Text, nullable=True)
     suggested_expert_name = Column(String, nullable=True)

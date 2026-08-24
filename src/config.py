@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -31,7 +31,6 @@ class AuthConfig:
     access_token_expiry_minutes: int
     refresh_token_expiry_days: int
     cookie_secure: bool  # false only for local http dev
-    trusted_jwt_secrets: list = field(default_factory=list)  # e.g. Infollion SSO tokens
 
 
 @dataclass
@@ -139,9 +138,6 @@ class Settings:
         if not cors_origins:
             raise RuntimeError("CORS_ALLOWED_ORIGINS must contain at least one origin. App cannot start.")
 
-        raw_trusted_secrets = get_env("JWT_TRUSTED_SECRETS", default="", required=False)
-        trusted_secrets = [s.strip() for s in raw_trusted_secrets.split(",") if s.strip()]
-
         return cls(
             database=DatabaseConfig(
                 url=get_env("DATABASE_URL"),
@@ -151,7 +147,6 @@ class Settings:
                 access_token_expiry_minutes=int(get_env("ACCESS_TOKEN_EXPIRY_MINUTES", default="15", required=False)),
                 refresh_token_expiry_days=int(get_env("REFRESH_TOKEN_EXPIRY_DAYS", default="30", required=False)),
                 cookie_secure=get_bool_env("COOKIE_SECURE", default=True),
-                trusted_jwt_secrets=trusted_secrets,
             ),
             services=ServicesConfig(
                 cors_origins=cors_origins,

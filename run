@@ -1,0 +1,203 @@
+#!/bin/bash
+# Run script for Syndicate Transcript Backend.
+#
+# Usage:
+#   ./run                        - build + start (detached), dev env
+#   ./run --env prod             - build + start (detached), prod env
+#   ./run restart [--env dev|prod]
+#   ./run stop
+#   ./run logs [--lines N] [--env dev|prod]
+#   ./run ps | status
+#   ./run migrate [--env dev|prod]
+#   ./run build [--env dev|prod]
+#
+# Flags:
+#   --yes   - skip the interactive PROD confirmation prompt
+#
+# Examples:
+#   ./run                         # start (dev)
+#   ./run --env prod              # start (prod)
+#   ./run restart --env prod
+#   ./run logs --lines 200
+#   ./run migrate --env prod
+
+set -euo pipefail
+
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$BASE_DIR"
+
+IMAGE="syndicate-backend"
+CONTAINER="syndicate-backend"
+
+normalize_env() {
+  case "$1" in
+    prod|production) echo "prod" ;;
+    dev|development|"") echo "dev" ;;
+    *) echo "Invalid env: $1 (expected dev, development, prod, or production)" >&2; exit 1 ;;
+  esac
+}
+
+resolve_env_file() {
+  case "$(normalize_env "$1")" in
+    prod) echo "$BASE_DIR/.env.production" ;;
+    dev)  echo "$BASE_DIR/.env.dev" ;;
+  esac
+}
+
+confirm_prod() {
+  local action="$1"
+  if [ "$ENV_MODE" = "prod" ] && [ "${SKIP_PROD_CONFIRM:-false}" != "true" ]; then
+    printf "\n⚠️  About to %s the backend on PROD. Continue? [y/N] " "$action"
+    read -r reply
+    if [ "$reply" != "y" ] && [ "$reply" != "Y" ]; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+}
+
+check_env_file() {
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "ERROR: env file not found: $ENV_FILE"
+    exit 1
+  fi
+}
+
+do_build() {
+  echo "Building image $IMAGE (env: $ENV_MODE)"
+  docker build --build-arg CACHEBUST="$(date +%s)" -t "$IMAGE" .
+}
+
+do_stop() {
+  docker stop "$CONTAINER" >/dev/null 2>&1 || true
+  docker rm "$CONTAINER" >/dev/null 2>&1 || true
+}
+
+do_start() {
+  check_env_file
+  confirm_prod "start"
+  do_build
+  do_stop
+  docker run -d --name "$CONTAINER" -p 8000:8000 --env-file "$ENV_FILE" "$IMAGE"
+  echo ""
+  echo ">> $CONTAINER started on http://localhost:8000 (env: $ENV_MODE) — follow logs with: ./run logs"
+}
+
+show_help() {
+  echo "Usage: $0 [command] [--env dev|development|prod|production] [--yes]"
+  echo ""
+  echo "Startup:"
+  echo "  (no args)              - build + start, detached, dev env"
+  echo "  --env prod             - build + start, detached, prod env"
+  echo ""
+  echo "Commands:"
+  echo "  restart [--env]        - rebuild image and replace the running container"
+  echo "  stop                   - stop + remove the container"
+  echo "  logs [--lines N]       - tail logs (default last 80; --lines all for full history)"
+  echo "  ps | status            - show whether the container is running, health, uptime"
+  echo "  migrate [--env]        - run 'alembic upgrade head' without starting the app"
+  echo "  build [--env]          - rebuild the image only"
+  echo ""
+  echo "Flags:"
+  echo "  --yes                  - skip the interactive PROD confirmation prompt"
+  echo ""
+  echo "Examples:"
+  echo "  ./run"
+  echo "  ./run --env prod"
+  echo "  ./run restart --env prod"
+  echo "  ./run logs --lines 200"
+  echo "  ./run migrate --env prod"
+}
+
+MODE="${1:-}"
+shift || true
+
+ENV_MODE="dev"
+SKIP_PROD_CONFIRM=false
+LOG_LINES="80"
+
+case "$MODE" in
+  restart|stop|logs|ps|status|migrate|build)
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --env) ENV_MODE="$(normalize_env "${2:-dev}")"; shift 2 ;;
+        --yes) SKIP_PROD_CONFIRM=true; shift ;;
+        --lines) LOG_LINES="${2:-80}"; shift 2 ;;
+        --*) echo "Unknown flag: $1"; exit 1 ;;
+        *) echo "Unexpected argument: $1"; exit 1 ;;
+      esac
+    done
+    ENV_FILE="$(resolve_env_file "$ENV_MODE")"
+
+    case "$MODE" in
+      restart)
+        do_start
+        ;;
+
+      stop)
+        confirm_prod "stop"
+        echo "Stopping $CONTAINER"
+        do_stop
+        ;;
+
+      logs)
+        if [ "$LOG_LINES" = "all" ]; then
+          docker logs -f "$CONTAINER"
+        else
+          docker logs --tail "$LOG_LINES" -f "$CONTAINER"
+        fi
+        ;;
+
+      ps|status)
+        docker ps -a --filter "name=^${CONTAINER}$" \
+          --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        ;;
+
+      migrate)
+        check_env_file
+        confirm_prod "run migrations on"
+        do_build
+        echo "Running migrations (env: $ENV_MODE)"
+        docker run --rm --env-file "$ENV_FILE" --entrypoint alembic "$IMAGE" upgrade head
+        echo "Migrations complete."
+        ;;
+
+      build)
+        do_build
+        ;;
+    esac
+    exit 0
+    ;;
+
+  help|--help|-h)
+    show_help
+    exit 0
+    ;;
+
+  "")
+    ENV_FILE="$(resolve_env_file "$ENV_MODE")"
+    do_start
+    exit 0
+    ;;
+
+  --env)
+    ENV_MODE="$(normalize_env "${1:-dev}")"
+    shift || true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --yes) SKIP_PROD_CONFIRM=true; shift ;;
+        --*) echo "Unknown flag: $1"; exit 1 ;;
+        *) echo "Unexpected argument: $1"; exit 1 ;;
+      esac
+    done
+    ENV_FILE="$(resolve_env_file "$ENV_MODE")"
+    do_start
+    exit 0
+    ;;
+
+  *)
+    echo "Unknown command: $MODE"
+    show_help
+    exit 1
+    ;;
+esac

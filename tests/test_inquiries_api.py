@@ -11,7 +11,7 @@ def _valid_support_payload(**overrides):
 
 
 def _valid_topic_payload(**overrides):
-    payload = {"topic": "AI in Healthcare", "domain": "Healthcare"}
+    payload = {"topic": "AI in Healthcare", "domains": ["Healthcare"]}
     payload.update(overrides)
     return payload
 
@@ -82,19 +82,19 @@ def test_submit_topic_request_stores_row(client, engine):
     with engine.begin() as conn:
         row = conn.execute(
             text(
-                "SELECT topic, domain, email_encrypted, remark, suggested_expert_name, suggested_expert_linkedin, "
+                "SELECT topic, domains, email_encrypted, remark, suggested_expert_name, suggested_expert_linkedin, "
                 "user_id FROM topic_requests"
             )
         ).fetchone()
     assert row is not None
     assert row.topic == "AI in Healthcare"
-    assert row.domain == "Healthcare"
+    assert row.domains == ["Healthcare"]
     assert decrypt_email(row.email_encrypted) == "requester@example.com"
     assert row.suggested_expert_name == "Dr. Smith"
     assert row.user_id is None
 
 
-def test_submit_topic_request_only_requires_topic_and_domain(client, engine):
+def test_submit_topic_request_only_requires_topic_and_domains(client, engine):
     # email/remark/suggestedExpert* are optional client-side too.
     resp = client.post("/api/topics/request", json=_valid_topic_payload())
     assert resp.status_code == 200, resp.text
