@@ -2,7 +2,7 @@ import logging
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import case, desc, func, literal, literal_column, or_
+from sqlalchemy import case, desc, func, literal, literal_column, or_, text
 
 from apis.models.order import Order, OrderItem, OrderStatus
 from apis.models.transcript import Transcript, TranscriptFilterBounds
@@ -27,16 +27,10 @@ from .transcripts_schema import (
 logger = logging.getLogger(__name__)
 
 
-def handle_list_transcripts(
-    params: PaginationParams, domains: str | None = None, geographies: str | None = None
-) -> Page:
+def handle_list_transcripts(params: PaginationParams) -> Page:
     session = get_session()
     try:
         query = session.query(*SLIM_TRANSCRIPT_COLUMNS).filter(Transcript.is_active.is_(True))
-        if domains:
-            query = query.filter(Transcript.domains.contains([domains]))
-        if geographies:
-            query = query.filter(Transcript.geographies.contains([geographies]))
         query = query.order_by(Transcript.published_at.desc())
 
         rows, total = paginate(query, params)
@@ -75,9 +69,9 @@ def handle_filter_transcripts(filters: TranscriptFilterRequest) -> Page:
             query = query.filter(
                 or_(
                     search_vector.op("@@")(search_query),
-                    topic_similarity > 0.3,
+                    text("transcripts.topic % :search_term"),
                 )
-            )
+            ).params(search_term=filters.search)
             search_rank = func.greatest(
                 func.ts_rank_cd(search_vector, search_query),
                 func.coalesce(topic_similarity, 0.0),
@@ -205,7 +199,7 @@ def handle_get_transcript_detail(transcript_id: uuid.UUID) -> TranscriptDetailRe
         session.close()
 
 
-def handle_get_similar_transcripts(transcript_id: uuid.UUID, limit: int = 3) -> list[TranscriptListItem]:
+def handle_get_similar_transcripts(transcript_id: uuid.UUID, limit: int = 10) -> list[TranscriptListItem]:
     session = get_session()
     try:
         source = (

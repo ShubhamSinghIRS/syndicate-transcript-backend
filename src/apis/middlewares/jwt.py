@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from apis.rate_limiting.limiter import RateLimitPolicy, RateLimits
 from apis.security import decode_access_token
 from config import get_settings
+from utils.cookies import ACCESS_COOKIE_NAME
+from utils.csrf import verify_same_origin
 from utils.request_meta import get_ip_address
 from utils.response import error_response
 
@@ -62,6 +64,20 @@ def _rate_limit_response(policy: RateLimitPolicy, key: str) -> JSONResponse | No
     return None
 
 
+def _csrf_response(request: Request) -> JSONResponse | None:
+    # The access-token cookie is attached by the browser to any cross-site
+    # request automatically, so state-changing requests need an explicit
+    # same-origin check the way header-based auth never did. Safe/read-only
+    # GETs are left alone.
+    if request.method == "GET":
+        return None
+    try:
+        verify_same_origin(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content=error_response(str(exc.detail)))
+    return None
+
+
 async def jwt_middleware(request: Request, call_next):
     path = request.url.path
 
@@ -91,19 +107,32 @@ async def jwt_middleware(request: Request, call_next):
             if blocked:
                 return blocked
 
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            payload = decode_access_token(auth_header.removeprefix("Bearer ").strip())
-            if payload:
-                request.state.user_id = payload.get("user_id")
+        blocked = _csrf_response(request)
+        if blocked:
+            return blocked
+
+        token = request.cookies.get(ACCESS_COOKIE_NAME)
+        if token:
+            payload = decode_access_token(token)
+            if payload is None:
+                # Cookie present but expired/invalid - unlike a genuinely
+                # anonymous visitor (no cookie at all), this is a logged-in
+                # user whose token lapsed. 401 so the frontend's existing
+                # refresh-and-retry logic runs instead of this silently
+                # falling back to an anonymous submission.
+                return JSONResponse(status_code=401, content=error_response("Invalid or expired token"))
+            request.state.user_id = payload.get("user_id")
         return await call_next(request)
 
     # Hard auth required.
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    blocked = _csrf_response(request)
+    if blocked:
+        return blocked
+
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not token:
         return JSONResponse(status_code=401, content=error_response("Not authenticated"))
 
-    token = auth_header.removeprefix("Bearer ").strip()
     payload = decode_access_token(token)
     if payload is None:
         return JSONResponse(status_code=401, content=error_response("Invalid or expired token"))

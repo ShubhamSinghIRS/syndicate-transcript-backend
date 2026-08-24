@@ -45,7 +45,8 @@ app.add_middleware(
     # Idempotency-Key is a custom header sent by the browser on POST /api/orders
     # (create order / "buy transcript"). It must be allow-listed or the CORS
     # preflight fails with "Disallowed CORS headers" and the buy request is blocked.
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    # Auth is cookie-based (see apis/middlewares/jwt.py) - no Authorization header needed.
+    allow_headers=["Content-Type", "Idempotency-Key"],
 )
 
 # Outermost: assign/propagate X-Request-ID so every log line carries the correlation id.

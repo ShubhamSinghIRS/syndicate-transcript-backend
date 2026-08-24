@@ -15,12 +15,8 @@ router = APIRouter(prefix=P.transcripts.BASE, tags=["Transcripts"])
 
 
 @router.get(P.transcripts.LIST, dependencies=[Depends(rate_limit_transcripts_public)])
-def list_transcripts(
-    domains: str | None = None,
-    geographies: str | None = None,
-    params: PaginationParams = Depends(),
-):
-    result = transcripts_controller.list_transcripts(params, domains, geographies)
+def list_transcripts(params: PaginationParams = Depends()):
+    result = transcripts_controller.list_transcripts(params)
     return success_response(data=result)
 
 
@@ -58,7 +54,7 @@ def get_transcript_detail(transcript_id: uuid.UUID):
 
 
 @router.get(P.transcripts.SIMILAR, dependencies=[Depends(rate_limit_transcripts_public)])
-def get_similar_transcripts(transcript_id: uuid.UUID, limit: int = 3):
+def get_similar_transcripts(transcript_id: uuid.UUID, limit: int = 10):
     result = transcripts_controller.get_similar_transcripts(transcript_id, limit)
     return success_response(data=result)
 

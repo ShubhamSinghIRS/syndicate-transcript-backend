@@ -11,8 +11,8 @@ from .transcripts_schema import (
 )
 
 
-def list_transcripts(params: PaginationParams, domains: str | None = None, geographies: str | None = None):
-    return handler.handle_list_transcripts(params, domains, geographies)
+def list_transcripts(params: PaginationParams):
+    return handler.handle_list_transcripts(params)
 
 
 def filter_transcripts(filters: TranscriptFilterRequest):

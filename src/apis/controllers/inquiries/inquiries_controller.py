@@ -18,5 +18,7 @@ def submit_topic_request(data: TopicRequestPayload, user_id: uuid.UUID | None, i
     handle_submit_topic_request(data, user_id, ip_address)
 
 
-def list_my_topic_requests(user_id: uuid.UUID, params: PaginationParams, search: str | None) -> Page:
-    return handle_list_my_topic_requests(user_id, params, search)
+def list_my_topic_requests(
+    user_id: uuid.UUID, email: str | None, params: PaginationParams, search: str | None
+) -> Page:
+    return handle_list_my_topic_requests(user_id, email, params, search)

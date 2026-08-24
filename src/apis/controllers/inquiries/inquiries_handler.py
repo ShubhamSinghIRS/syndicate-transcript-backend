@@ -2,8 +2,10 @@ import logging
 import uuid
 
 from fastapi import HTTPException
+from sqlalchemy import func, or_
 
 from apis.models.inquiries import SupportTicket, TopicRequest
+from services.crypto.email_crypto import hash_email
 from services.database.postgres.connection import get_session
 from utils.pagination import Page, PaginationParams, build_page, paginate
 
@@ -45,7 +47,7 @@ def handle_submit_topic_request(
         request = TopicRequest(
             name=data.name,
             topic=data.topic,
-            domain=data.domain,
+            domains=data.domains,
             remark=data.remark,
             suggested_expert_name=data.suggestedExpertName,
             suggested_expert_linkedin=data.suggestedExpertLinkedin,
@@ -65,16 +67,20 @@ def handle_submit_topic_request(
 
 
 def handle_list_my_topic_requests(
-    user_id: uuid.UUID, params: PaginationParams, search: str | None
+    user_id: uuid.UUID, email: str | None, params: PaginationParams, search: str | None
 ) -> Page:
     session = get_session()
     try:
-        query = session.query(TopicRequest).filter(TopicRequest.user_id == user_id)
+        # Also match by email so a request made anonymously (before signing up
+        # or while logged out) shows up once the same email is logged in.
+        owner_match = TopicRequest.user_id == user_id
+        if email:
+            owner_match = or_(owner_match, TopicRequest.email_hash == hash_email(email))
+        query = session.query(TopicRequest).filter(owner_match)
         if search:
             term = f"%{search}%"
-            query = query.filter(
-                (TopicRequest.topic.ilike(term)) | (TopicRequest.domain.ilike(term))
-            )
+            domains_text = func.array_to_string(TopicRequest.domains, ", ")
+            query = query.filter((TopicRequest.topic.ilike(term)) | (domains_text.ilike(term)))
         query = query.order_by(TopicRequest.created_at.desc())
 
         rows, total = paginate(query, params)
@@ -82,7 +88,7 @@ def handle_list_my_topic_requests(
             TopicRequestListItem(
                 id=row.id,
                 topic=row.topic,
-                domain=row.domain,
+                domains=row.domains,
                 status=row.status,
                 createdAt=row.created_at,
             )

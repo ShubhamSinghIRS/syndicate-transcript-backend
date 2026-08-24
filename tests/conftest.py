@@ -15,7 +15,6 @@ _TEST_ENV = {
     "ACCESS_TOKEN_EXPIRY_MINUTES": "15",
     "REFRESH_TOKEN_EXPIRY_DAYS": "30",
     "COOKIE_SECURE": "false",
-    "JWT_TRUSTED_SECRETS": "",
     "CORS_ALLOWED_ORIGINS": "http://localhost:5173",
     "FRONTEND_BASE_URL": "http://localhost:5173",
     "LOG_LEVEL": "WARNING",

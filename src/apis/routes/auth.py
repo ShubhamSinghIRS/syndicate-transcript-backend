@@ -21,7 +21,13 @@ from apis.rate_limiting.dependencies import (
     rate_limit_resend_otp,
 )
 from config import get_settings
-from utils.cookies import REFRESH_COOKIE_NAME, clear_refresh_cookie, set_refresh_cookie
+from utils.cookies import (
+    REFRESH_COOKIE_NAME,
+    clear_access_cookie,
+    clear_refresh_cookie,
+    set_access_cookie,
+    set_refresh_cookie,
+)
 from utils.csrf import verify_same_origin
 from utils.request_meta import get_device_info, get_ip_address
 from utils.response import success_response
@@ -36,6 +42,11 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     set_refresh_cookie(response, raw_token, auth_settings.cookie_secure, auth_settings.refresh_token_expiry_days)
 
 
+def _set_access_cookie(response: Response, token: str) -> None:
+    auth_settings = get_settings().auth
+    set_access_cookie(response, token, auth_settings.cookie_secure, auth_settings.access_token_expiry_minutes)
+
+
 @router.post(P.auth.REGISTER, dependencies=[Depends(rate_limit_register)])
 def register(data: RegisterRequest):
     result = auth_controller.register(data)
@@ -48,7 +59,8 @@ def verify_registration_otp(data: VerifyOtpRequest, request: Request, response: 
         data, get_device_info(request), get_ip_address(request)
     )
     _set_refresh_cookie(response, raw_refresh_token)
-    return success_response(data=auth_response, message="Registration successful.")
+    _set_access_cookie(response, auth_response.token)
+    return success_response(data=auth_response.user, message="Registration successful.")
 
 
 @router.post(P.auth.REGISTER_RESEND_OTP, dependencies=[Depends(rate_limit_resend_otp)])
@@ -61,7 +73,8 @@ def resend_otp(data: ResendOtpRequest):
 def login(data: LoginRequest, request: Request, response: Response):
     auth_response, raw_refresh_token = auth_controller.login(data, get_device_info(request), get_ip_address(request))
     _set_refresh_cookie(response, raw_refresh_token)
-    return success_response(data=auth_response, message="Login successful.")
+    _set_access_cookie(response, auth_response.token)
+    return success_response(data=auth_response.user, message="Login successful.")
 
 
 @router.post(P.auth.LOGIN_OTP_SEND, dependencies=[Depends(rate_limit_login_otp_send)])
@@ -76,7 +89,8 @@ def verify_login_otp(data: LoginOtpVerifyRequest, request: Request, response: Re
         data, get_device_info(request), get_ip_address(request)
     )
     _set_refresh_cookie(response, raw_refresh_token)
-    return success_response(data=auth_response, message="Login successful.")
+    _set_access_cookie(response, auth_response.token)
+    return success_response(data=auth_response.user, message="Login successful.")
 
 
 @router.post(P.auth.REFRESH)
@@ -89,7 +103,8 @@ def refresh(request: Request, response: Response):
         raw_token, get_device_info(request), get_ip_address(request)
     )
     _set_refresh_cookie(response, new_raw_refresh_token)
-    return success_response(data=auth_response, message="Token refreshed.")
+    _set_access_cookie(response, auth_response.token)
+    return success_response(data=auth_response.user, message="Token refreshed.")
 
 
 @router.post(P.auth.FORGOT_PASSWORD, dependencies=[Depends(rate_limit_forgot_password)])
@@ -110,4 +125,5 @@ def logout(request: Request, response: Response):
     raw_token = request.cookies.get(REFRESH_COOKIE_NAME)
     auth_controller.logout(raw_token)
     clear_refresh_cookie(response, get_settings().auth.cookie_secure)
+    clear_access_cookie(response, get_settings().auth.cookie_secure)
     return success_response(message="Logged out successfully.")
