@@ -14,9 +14,9 @@ class SupportMessagePayload(BaseModel):
 
 
 class TopicRequestPayload(BaseModel):
-    name: str | None = Field(default=None, max_length=200)
+    name: str | None = Field(default=None, max_length=400)
     topic: str = Field(min_length=1, max_length=300)
-    domains: list[_DomainItem] = Field(min_length=1, max_length=20)
+    domains: list[_DomainItem] = Field(min_length=2, max_length=200)
     email: EmailStr | None = None
     remark: str | None = Field(default=None, max_length=2000)
     suggestedExpertName: str | None = Field(default=None, max_length=200)
