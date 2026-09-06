@@ -41,9 +41,9 @@ def list_domains():
     return success_response(data=result)
 
 
-@router.get(P.transcripts.FILTER_BOUNDS, dependencies=[Depends(rate_limit_transcripts_public)])
-def get_filter_bounds():
-    result = transcripts_controller.get_filter_bounds()
+@router.get(P.transcripts.FILTER_OPTIONS, dependencies=[Depends(rate_limit_transcripts_public)])
+def get_filter_options():
+    result = transcripts_controller.get_filter_options()
     return success_response(data=result)
 
 

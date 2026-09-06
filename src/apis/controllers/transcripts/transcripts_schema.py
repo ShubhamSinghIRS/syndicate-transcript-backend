@@ -32,11 +32,30 @@ class TranscriptDetailResponse(TranscriptListItem):
     pass
 
 
-class TranscriptFilterBoundsResponse(BaseModel):
+class PriceFilterOption(BaseModel):
+    value: str
+    label: str
     minPrice: int | None
     maxPrice: int | None
-    minPublishedAt: datetime | None
-    maxPublishedAt: datetime | None
+
+
+class PublishedDateFilterOption(BaseModel):
+    value: str
+    label: str
+    # Cutoff computed from the server's own clock at request time - the
+    # frontend sends this straight back as `publishedAfter` rather than
+    # deriving it from the viewer's local clock.
+    after: datetime
+
+
+class TranscriptFilterOptionsResponse(BaseModel):
+    priceOptions: list[PriceFilterOption]
+    publishedDateOptions: list[PublishedDateFilterOption]
+
+
+class PriceRange(BaseModel):
+    minPrice: int | None = None
+    maxPrice: int | None = None
 
 
 class TranscriptFilterRequest(BaseModel):
@@ -54,8 +73,11 @@ class TranscriptFilterRequest(BaseModel):
     # domains/geographies. Does not match on expert_name (see build_transcript_search_vector).
     search: str | None = None
     expertId: int | None = None  # fk_expert (external expert-management id) - intentionally not a UUID
-    minPrice: int | None = None
-    maxPrice: int | None = None
+    # Several disjoint brackets can be selected at once (e.g. "Free" + "$170-$340"),
+    # so this is a list of ranges OR'd together, not one min/max span - a single
+    # min/max pair can't express a gap, and approximating with one span would
+    # wrongly include whatever sits between the selected brackets.
+    priceRanges: list[PriceRange] | None = None
     publishedAfter: datetime | None = None
     page: int = Field(default=1, ge=1)
     limit: int = Field(default=20, ge=1)

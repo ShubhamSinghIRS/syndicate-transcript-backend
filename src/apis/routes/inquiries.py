@@ -45,3 +45,15 @@ def list_my_topic_requests(
 ):
     result = inquiries_controller.list_my_topic_requests(user_id, email, params, search)
     return success_response(data=result)
+
+
+# Registered after MY_REQUESTS - as a dynamic path segment, this would
+# otherwise match "/my-requests" as request_id="my-requests" if it came first.
+@topics_router.get(P.topics.DETAIL)
+def get_my_topic_request_detail(
+    request_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    email: str | None = Depends(get_current_user_email),
+):
+    result = inquiries_controller.get_my_topic_request_detail(user_id, email, request_id)
+    return success_response(data=result)

@@ -1,8 +1,9 @@
 import logging
 import uuid
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import case, desc, func, literal, literal_column, or_, text
+from sqlalchemy import and_, case, desc, func, literal, literal_column, or_, text
 
 from apis.models.order import Order, OrderItem, OrderStatus
 from apis.models.transcript import Transcript, TranscriptFilterBounds
@@ -18,13 +19,47 @@ from .transcripts_helper import (
     row_to_transcript_list_item,
 )
 from .transcripts_schema import (
+    PriceFilterOption,
+    PublishedDateFilterOption,
     TranscriptDetailResponse,
-    TranscriptFilterBoundsResponse,
+    TranscriptFilterOptionsResponse,
     TranscriptFilterRequest,
     TranscriptListItem,
 )
 
 logger = logging.getLogger(__name__)
+
+# (value, label, days-back) - kept in one place so the option list and the
+# frontend's old client-side copy of these buckets can't drift independently.
+_PUBLISHED_DATE_BUCKETS = [
+    ("last-week", "Last week", 7),
+    ("last-month", "Last month", 30),
+    ("last-3-months", "Last 3 months", 90),
+    ("last-year", "Last year", 365),
+]
+
+
+def _round_to_10(value: float) -> int:
+    return round(value / 10) * 10
+
+
+# Matches the "under-100"/"100-250"/"over-250" filter option keys below -
+# used only when there's no real price data to compute breakpoints from.
+_FALLBACK_LOW_BREAKPOINT = 100
+_FALLBACK_HIGH_BREAKPOINT = 250
+
+
+# Splits [minPrice, maxPrice] into two round-number breakpoints so the
+# "under X" / "X - Y" / "over Y" buckets track real data instead of fixed
+# thresholds. Mirrors what the frontend used to compute client-side.
+def _price_breakpoints(min_price: int | None, max_price: int | None) -> tuple[int, int]:
+    lo = min_price or 0
+    hi = max_price if max_price is not None else _FALLBACK_HIGH_BREAKPOINT
+    if hi <= lo:
+        return _FALLBACK_LOW_BREAKPOINT, _FALLBACK_HIGH_BREAKPOINT
+    low = max(lo, _round_to_10(lo + (hi - lo) / 3))
+    high = max(low + 10, _round_to_10(lo + (hi - lo) * 2 / 3))
+    return low, high
 
 
 def handle_list_transcripts(params: PaginationParams) -> Page:
@@ -78,10 +113,21 @@ def handle_filter_transcripts(filters: TranscriptFilterRequest) -> Page:
             )
         if filters.expertId is not None:
             query = query.filter(Transcript.fk_expert == filters.expertId)
-        if filters.minPrice is not None:
-            query = query.filter(Transcript.price >= filters.minPrice)
-        if filters.maxPrice is not None:
-            query = query.filter(Transcript.price <= filters.maxPrice)
+        if filters.priceRanges:
+            # OR'd together, not one min-to-max span - several disjoint
+            # brackets (e.g. "Free" + "$170-$340") must not pull in whatever
+            # sits between them.
+            range_clauses = []
+            for price_range in filters.priceRanges:
+                clauses = []
+                if price_range.minPrice is not None:
+                    clauses.append(Transcript.price >= price_range.minPrice)
+                if price_range.maxPrice is not None:
+                    clauses.append(Transcript.price <= price_range.maxPrice)
+                if clauses:
+                    range_clauses.append(and_(*clauses))
+            if range_clauses:
+                query = query.filter(or_(*range_clauses))
         if filters.publishedAfter is not None:
             query = query.filter(Transcript.published_at >= filters.publishedAfter)
 
@@ -154,23 +200,36 @@ def handle_list_domains() -> list[str]:
         session.close()
 
 
-def handle_get_filter_bounds() -> TranscriptFilterBoundsResponse:
-    # Read from the pre-computed table (kept in sync by a DB trigger) rather than
-    # aggregating transcripts directly, so this stays a cheap single-row lookup.
+def handle_get_filter_options() -> TranscriptFilterOptionsResponse:
+    # Read bounds from the pre-computed table (kept in sync by a DB trigger)
+    # rather than aggregating transcripts directly, so this stays a cheap
+    # single-row lookup. Bucket labels/ranges/cutoffs are computed here so
+    # the frontend only has to render what it's given, not recompute it.
     session = get_session()
     try:
         bounds = session.query(TranscriptFilterBounds).get(1)
-        return TranscriptFilterBoundsResponse(
-            minPrice=bounds.min_price if bounds else None,
-            maxPrice=bounds.max_price if bounds else None,
-            minPublishedAt=bounds.min_published_at if bounds else None,
-            maxPublishedAt=bounds.max_published_at if bounds else None,
+        low, high = _price_breakpoints(
+            bounds.min_price if bounds else None, bounds.max_price if bounds else None
         )
+        price_options = [
+            PriceFilterOption(value="free", label="Free", minPrice=0, maxPrice=0),
+            PriceFilterOption(value="under-100", label=f"Under ${low}", minPrice=None, maxPrice=low - 1),
+            PriceFilterOption(value="100-250", label=f"${low} - ${high}", minPrice=low, maxPrice=high),
+            PriceFilterOption(value="over-250", label=f"Over ${high}", minPrice=high + 1, maxPrice=None),
+        ]
+
+        now = datetime.utcnow()
+        published_date_options = [
+            PublishedDateFilterOption(value=value, label=label, after=now - timedelta(days=days))
+            for value, label, days in _PUBLISHED_DATE_BUCKETS
+        ]
+
+        return TranscriptFilterOptionsResponse(priceOptions=price_options, publishedDateOptions=published_date_options)
     except HTTPException:
         raise
     except Exception:
         session.rollback()
-        logger.exception("Failed to fetch transcript filter bounds")
+        logger.exception("Failed to fetch transcript filter options")
         raise HTTPException(status_code=500, detail="Internal error") from None
     finally:
         session.close()

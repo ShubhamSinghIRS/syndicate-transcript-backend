@@ -36,3 +36,11 @@ class TopicRequestListItem(BaseModel):
     domains: list[str]
     status: str
     createdAt: datetime | None
+
+
+# Same fields the request was submitted with (TopicRequestPayload), for the
+# "view request" dialog - remark and expert details aren't needed in the list.
+class TopicRequestDetailResponse(TopicRequestListItem):
+    remark: str | None
+    suggestedExpertName: str | None
+    suggestedExpertLinkedin: str | None

@@ -64,3 +64,12 @@ class AuthUserResponse(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: AuthUserResponse
+
+
+class AuthSessionResponse(BaseModel):
+    user: AuthUserResponse
+    # Seconds until the access token just issued (as an httpOnly cookie)
+    # expires - lets the frontend schedule a proactive refresh instead of
+    # only reacting after a request 401s. The token itself is never in the
+    # response body.
+    accessTokenExpiresIn: int

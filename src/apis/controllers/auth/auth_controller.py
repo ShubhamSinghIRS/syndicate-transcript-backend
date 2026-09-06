@@ -1,3 +1,5 @@
+from fastapi import BackgroundTasks
+
 from .auth_handler import (
     handle_forgot_password,
     handle_login,
@@ -25,9 +27,9 @@ from .auth_schema import (
 from .auth_validator import validate_otp_format, validate_password
 
 
-def register(data: RegisterRequest) -> PendingAuthResponse:
+def register(data: RegisterRequest, background_tasks: BackgroundTasks) -> PendingAuthResponse:
     validate_password(data.password)
-    return handle_register(data)
+    return handle_register(data, background_tasks)
 
 
 def verify_registration_otp(
@@ -37,16 +39,16 @@ def verify_registration_otp(
     return handle_verify_registration_otp(data.tempToken, data.otp, device_info, ip_address)
 
 
-def resend_otp(data: ResendOtpRequest) -> PendingAuthResponse:
-    return handle_resend_otp(data.tempToken)
+def resend_otp(data: ResendOtpRequest, background_tasks: BackgroundTasks) -> PendingAuthResponse:
+    return handle_resend_otp(data.tempToken, background_tasks)
 
 
 def login(data: LoginRequest, device_info: str | None, ip_address: str | None) -> tuple[AuthResponse, str]:
     return handle_login(data.email, data.password, device_info, ip_address)
 
 
-def send_login_otp(data: LoginOtpSendRequest) -> PendingAuthResponse:
-    return handle_send_login_otp(data.email)
+def send_login_otp(data: LoginOtpSendRequest, background_tasks: BackgroundTasks) -> PendingAuthResponse:
+    return handle_send_login_otp(data.email, background_tasks)
 
 
 def verify_login_otp(
@@ -56,8 +58,8 @@ def verify_login_otp(
     return handle_verify_login_otp(data.tempToken, data.otp, device_info, ip_address)
 
 
-def forgot_password(data: ForgotPasswordRequest) -> None:
-    handle_forgot_password(data.email)
+def forgot_password(data: ForgotPasswordRequest, background_tasks: BackgroundTasks) -> None:
+    handle_forgot_password(data.email, background_tasks)
 
 
 def reset_password(data: ResetPasswordRequest) -> None:

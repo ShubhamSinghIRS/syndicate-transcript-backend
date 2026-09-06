@@ -4,6 +4,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from apis.rate_limiting.limiter import RateLimitPolicy, RateLimits
+from apis.routes.paths import P
 from apis.security import decode_access_token
 from config import get_settings
 from utils.cookies import ACCESS_COOKIE_NAME
@@ -17,42 +18,49 @@ from utils.response import error_response
 # more specific (per-endpoint IP limits, OTP-generation limits, etc.) lives as
 # route-level dependencies in apis/rate_limiting/dependencies.py instead, so
 # this file stays a simple, business-logic-free auth gate.
+#
+# Every path below is built from apis.routes.paths.P rather than hardcoded as
+# a literal string, so this gate can't silently drift out of sync with the
+# actual route table (e.g. after an API version bump) the way two independent
+# copies of the same path would.
 
 # Dynamic id - scoped to one segment so /me/purchased, /{id}/view|download stay protected.
-PUBLIC_PATH_RE = re.compile(r"^/api/transcripts/[^/]+$")
+PUBLIC_PATH_RE = re.compile(rf"^{re.escape(P.transcripts.BASE)}/[^/]+$")
 
 # Also public, like the detail page itself - unlike /view|download, there's no
 # entitlement being checked here, just a read-only recommendation list.
-PUBLIC_TRANSCRIPT_SUBPATH_RE = re.compile(r"^/api/transcripts/[^/]+/similar$")
+PUBLIC_TRANSCRIPT_SUBPATH_RE = re.compile(rf"^{re.escape(P.transcripts.BASE)}/[^/]+/similar$")
 
-WEBHOOK_PATH_RE = re.compile(r"^/api/orders/webhook/[^/]+$")  # verified via gateway signature instead
+# Verified via gateway signature instead - and unversioned, since this URL is
+# registered directly in the payment gateway's dashboard (see paths.py).
+WEBHOOK_PATH_RE = re.compile(rf"^{re.escape(P.orders_webhook.BASE)}/webhook/[^/]+$")
 
 # Server-to-server transcript ingest from the Infollion backend - authenticated by a
 # shared x-api-key at the route level (see apis/dependencies.verify_ingest_api_key),
 # so it bypasses the JWT gate. Treated like webhooks: exempt from IP rate-limiting too.
-INGEST_PATH_RE = re.compile(r"^/api/internal/transcripts(/[^/]+)?$")
+INGEST_PATH_RE = re.compile(rf"^{re.escape(P.transcript_ingest.BASE)}(/[^/]+)?$")
 
-# Bearer token decoded if present, but not required. /api/cart/merge excluded.
-SOFT_AUTH_PATHS = {"/api/cart", "/api/support", "/api/topics/request"}
-SOFT_AUTH_PATH_RE = re.compile(r"^/api/cart/items(/[^/]+)?$")
+# Bearer token decoded if present, but not required. .../cart/merge excluded.
+SOFT_AUTH_PATHS = {P.cart.BASE, P.support.BASE, f"{P.topics.BASE}{P.topics.REQUEST}"}
+SOFT_AUTH_PATH_RE = re.compile(rf"^{re.escape(P.cart.BASE + P.cart.ITEMS)}(/[^/]+)?$")
 
 _DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"} if get_settings().services.enable_docs else set()
 
 UNPROTECTED_PATHS = {
-    "/health",
+    P.system.HEALTH,
     *_DOCS_PATHS,
-    "/api/auth/register",
-    "/api/auth/register/verify-otp",
-    "/api/auth/register/resend-otp",
-    "/api/auth/login",
-    "/api/auth/login/otp/send",
-    "/api/auth/login/otp/verify",
-    "/api/auth/refresh",
-    "/api/auth/logout",
-    "/api/auth/forgot-password",
-    "/api/auth/reset-password",
-    "/api/transcripts",
-    "/api/transcripts/domains",
+    f"{P.auth.BASE}{P.auth.REGISTER}",
+    f"{P.auth.BASE}{P.auth.REGISTER_VERIFY_OTP}",
+    f"{P.auth.BASE}{P.auth.REGISTER_RESEND_OTP}",
+    f"{P.auth.BASE}{P.auth.LOGIN}",
+    f"{P.auth.BASE}{P.auth.LOGIN_OTP_SEND}",
+    f"{P.auth.BASE}{P.auth.LOGIN_OTP_VERIFY}",
+    f"{P.auth.BASE}{P.auth.REFRESH}",
+    f"{P.auth.BASE}{P.auth.LOGOUT}",
+    f"{P.auth.BASE}{P.auth.FORGOT_PASSWORD}",
+    f"{P.auth.BASE}{P.auth.RESET_PASSWORD}",
+    P.transcripts.BASE,
+    f"{P.transcripts.BASE}{P.transcripts.DOMAINS}",
 }
 
 
@@ -140,6 +148,7 @@ async def jwt_middleware(request: Request, call_next):
     request.state.user_id = payload.get("user_id")
     request.state.user_name = payload.get("user_name")
     request.state.email = payload.get("email")
+    request.state.access_token_exp = payload.get("exp")
 
     blocked = _rate_limit_response(RateLimits.general.AUTHENTICATED_USER, f"user:{request.state.user_id}")
     if blocked:

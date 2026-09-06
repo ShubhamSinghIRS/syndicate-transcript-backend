@@ -3,7 +3,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from apis.models.session import Session
@@ -56,7 +56,23 @@ def _send_email_best_effort(send_fn, *args) -> None:
         logger.exception("Failed to send email (best effort)")
 
 
-def handle_register(data: RegisterRequest) -> PendingAuthResponse:
+def _schedule_email(background_tasks: BackgroundTasks, send_fn, *args) -> None:
+    # Scheduled to run after the response is already sent to the client
+    # (FastAPI's BackgroundTasks), not awaited inline - the actual work
+    # (creating the account/OTP/reset-token) is already committed by this
+    # point, so the client shouldn't have to sit through a slow or
+    # intermittently-slow third-party API call (SendGrid) that has nothing
+    # to do with whether their own request succeeded.
+    background_tasks.add_task(_send_email_best_effort, send_fn, *args)
+
+
+def _revoke_all_sessions(session, user_id) -> None:
+    session.query(Session).filter(Session.user_id == user_id, Session.revoked_at.is_(None)).update(
+        {"revoked_at": datetime.utcnow()}
+    )
+
+
+def handle_register(data: RegisterRequest, background_tasks: BackgroundTasks) -> PendingAuthResponse:
     session = get_session()
     try:
         try:
@@ -90,7 +106,7 @@ def handle_register(data: RegisterRequest) -> PendingAuthResponse:
             )
             temp_token = create_pending_verification_token(user.id)
             session.commit()
-            _send_email_best_effort(send_registration_otp, data.email, otp_code)
+            _schedule_email(background_tasks, send_registration_otp, data.email, otp_code)
             return PendingAuthResponse(tempToken=temp_token)
         except IntegrityError:
             raise HTTPException(status_code=409, detail="An account with this email already exists.") from None
@@ -130,7 +146,7 @@ def handle_verify_registration_otp(
         session.close()
 
 
-def handle_resend_otp(temp_token: str) -> PendingAuthResponse:
+def handle_resend_otp(temp_token: str, background_tasks: BackgroundTasks) -> PendingAuthResponse:
     session = get_session()
     try:
         user = get_pending_verification_user(session, temp_token)
@@ -146,7 +162,7 @@ def handle_resend_otp(temp_token: str) -> PendingAuthResponse:
         )
         new_temp_token = create_pending_verification_token(user.id)
         session.commit()
-        _send_email_best_effort(send_registration_otp, user.email, otp_code)
+        _schedule_email(background_tasks, send_registration_otp, user.email, otp_code)
         return PendingAuthResponse(tempToken=new_temp_token)
     except HTTPException:
         raise
@@ -205,7 +221,7 @@ def handle_login(
         session.close()
 
 
-def handle_send_login_otp(email: str) -> PendingAuthResponse:
+def handle_send_login_otp(email: str, background_tasks: BackgroundTasks) -> PendingAuthResponse:
     session = get_session()
     try:
         user = session.query(User).filter(User.email_hash == hash_email(email)).first()
@@ -221,7 +237,7 @@ def handle_send_login_otp(email: str) -> PendingAuthResponse:
         )
         temp_token = create_otp_login_token(user.id)
         session.commit()
-        _send_email_best_effort(send_login_otp, user.email, otp_code)
+        _schedule_email(background_tasks, send_login_otp, user.email, otp_code)
         return PendingAuthResponse(tempToken=temp_token)
     except HTTPException:
         raise
@@ -260,7 +276,7 @@ def handle_verify_login_otp(
         session.close()
 
 
-def handle_forgot_password(email: str) -> None:
+def handle_forgot_password(email: str, background_tasks: BackgroundTasks) -> None:
     session = get_session()
     try:
         user = session.query(User).filter(User.email_hash == hash_email(email)).first()
@@ -277,7 +293,7 @@ def handle_forgot_password(email: str) -> None:
             user.reset_requested_at = datetime.utcnow()
             session.commit()
             reset_link = f"{get_settings().services.frontend_base_url}/reset-password?token={raw_token}"
-            _send_email_best_effort(send_password_reset_link, user.email, reset_link)
+            _schedule_email(background_tasks, send_password_reset_link, user.email, reset_link)
     except HTTPException:
         raise
     except Exception:
@@ -300,6 +316,9 @@ def handle_reset_password(token: str, new_password: str) -> None:
         # Single-use: nothing left to match against on replay.
         user.reset_token_hash = None
         user.reset_token_expire_at = None
+        # A reset is often triggered by a compromise - revoke every other
+        # session so a stolen refresh token doesn't survive the recovery.
+        _revoke_all_sessions(session, user.id)
         session.commit()
     except HTTPException:
         raise
@@ -321,9 +340,7 @@ def handle_refresh(raw_token: str, device_info: str | None, ip_address: str | No
 
         if existing.revoked_at is not None:
             # Reuse of an already-rotated token = likely theft; revoke every session.
-            session.query(Session).filter(
-                Session.user_id == existing.user_id, Session.revoked_at.is_(None)
-            ).update({"revoked_at": datetime.utcnow()})
+            _revoke_all_sessions(session, existing.user_id)
             session.commit()
             raise HTTPException(status_code=401, detail=INVALID_REFRESH_DETAIL)
 

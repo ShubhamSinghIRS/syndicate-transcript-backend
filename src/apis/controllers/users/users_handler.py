@@ -11,13 +11,19 @@ from .users_schema import ProfileResponse
 logger = logging.getLogger(__name__)
 
 
-def handle_get_profile(user_id: uuid.UUID) -> ProfileResponse:
+def handle_get_profile(user_id: uuid.UUID, access_token_expires_in: int) -> ProfileResponse:
     session = get_session()
     try:
         user = session.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return ProfileResponse(id=str(user.id), name=user.name, email=user.email, companyName=user.company_name)
+        return ProfileResponse(
+            id=str(user.id),
+            name=user.name,
+            email=user.email,
+            companyName=user.company_name,
+            accessTokenExpiresIn=access_token_expires_in,
+        )
     except HTTPException:
         raise
     except Exception:

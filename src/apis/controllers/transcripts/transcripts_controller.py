@@ -5,7 +5,7 @@ from utils.pagination import PaginationParams
 from . import transcripts_handler as handler
 from .transcripts_schema import (
     TranscriptDetailResponse,
-    TranscriptFilterBoundsResponse,
+    TranscriptFilterOptionsResponse,
     TranscriptFilterRequest,
     TranscriptListItem,
 )
@@ -27,8 +27,8 @@ def list_domains() -> list[str]:
     return handler.handle_list_domains()
 
 
-def get_filter_bounds() -> TranscriptFilterBoundsResponse:
-    return handler.handle_get_filter_bounds()
+def get_filter_options() -> TranscriptFilterOptionsResponse:
+    return handler.handle_get_filter_options()
 
 
 def get_transcript_detail(transcript_id: uuid.UUID) -> TranscriptDetailResponse:

@@ -34,7 +34,12 @@ def clear_access_cookie(response: Response, secure: bool) -> None:
     )
 
 
-def set_refresh_cookie(response: Response, token: str, secure: bool, max_age_days: int) -> None:
+# path is passed in by the caller (apis.routes.paths.P.auth.BASE) rather than
+# hardcoded here - this module is a generic cookie utility and shouldn't
+# import route structure, which would create a circular import back through
+# apis.routes.__init__ (it imports every route module, several of which
+# import this file).
+def set_refresh_cookie(response: Response, token: str, secure: bool, max_age_days: int, path: str) -> None:
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=token,
@@ -42,21 +47,21 @@ def set_refresh_cookie(response: Response, token: str, secure: bool, max_age_day
         httponly=True,
         secure=secure,
         samesite=_samesite(secure),
-        path="/api/auth",
+        path=path,
     )
 
 
-def clear_refresh_cookie(response: Response, secure: bool) -> None:
+def clear_refresh_cookie(response: Response, secure: bool, path: str) -> None:
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
-        path="/api/auth",
+        path=path,
         httponly=True,
         secure=secure,
         samesite=_samesite(secure),
     )
 
 
-def set_guest_cart_cookie(response: Response, guest_id: str, secure: bool, max_age_days: int = 180) -> None:
+def set_guest_cart_cookie(response: Response, guest_id: str, secure: bool, path: str, max_age_days: int = 180) -> None:
     response.set_cookie(
         key=GUEST_CART_COOKIE_NAME,
         value=guest_id,
@@ -64,14 +69,14 @@ def set_guest_cart_cookie(response: Response, guest_id: str, secure: bool, max_a
         httponly=True,
         secure=secure,
         samesite=_samesite(secure),
-        path="/api/cart",
+        path=path,
     )
 
 
-def clear_guest_cart_cookie(response: Response, secure: bool) -> None:
+def clear_guest_cart_cookie(response: Response, secure: bool, path: str) -> None:
     response.delete_cookie(
         key=GUEST_CART_COOKIE_NAME,
-        path="/api/cart",
+        path=path,
         httponly=True,
         secure=secure,
         samesite=_samesite(secure),

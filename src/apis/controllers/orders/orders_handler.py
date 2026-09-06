@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from apis.controllers.transcripts.transcripts_helper import has_transcript_access
@@ -26,10 +26,19 @@ class OrdersHandler:
     def __init__(self, payment_service: RazorpayService):
         self.payment_service = payment_service
 
-    def _existing_order_response(self, session, order: Order) -> CreateOrderResponse | FreeOrderResponse:
-        transcript_ids = [
-            row[0] for row in session.query(OrderItem.transcript_id).filter(OrderItem.order_id == order.id).all()
+    def _order_item_transcript_ids(self, session, order_id: uuid.UUID) -> list[uuid.UUID]:
+        return [
+            row[0] for row in session.query(OrderItem.transcript_id).filter(OrderItem.order_id == order_id).all()
         ]
+
+    def _schedule_invoice_email(self, background_tasks: BackgroundTasks, order_id: uuid.UUID) -> None:
+        background_tasks.add_task(self._email_invoice_best_effort, order_id)
+
+    def _existing_order_response(
+        self, session, order: Order, transcript_ids: list[uuid.UUID] | None = None
+    ) -> CreateOrderResponse | FreeOrderResponse:
+        if transcript_ids is None:
+            transcript_ids = self._order_item_transcript_ids(session, order.id)
         # Already paid (free order, or a real payment completed since this was
         # last checked) - nothing to resume with Razorpay.
         if order.status == OrderStatus.PAID.value:
@@ -47,7 +56,11 @@ class OrdersHandler:
         )
 
     def create_order(
-        self, user_id: uuid.UUID, transcript_ids: list[uuid.UUID], idempotency_key: str
+        self,
+        user_id: uuid.UUID,
+        transcript_ids: list[uuid.UUID],
+        idempotency_key: str,
+        background_tasks: BackgroundTasks,
     ) -> CreateOrderResponse | FreeOrderResponse:
         # Rate limiting (RateLimits.orders.CREATE_ORDER) happens in
         # rate_limit_create_order, wired onto this route as a dependency.
@@ -58,15 +71,29 @@ class OrdersHandler:
 
         session = get_session()
         try:
+            unique_ids = list(dict.fromkeys(transcript_ids))
+            requested_id_set = set(unique_ids)
+
             existing = (
                 session.query(Order)
                 .filter(Order.user_id == user_id, Order.idempotency_key == idempotency_key)
                 .first()
             )
             if existing is not None:
-                return self._existing_order_response(session, existing)
+                # An idempotency key must mean "the same request, retried" -
+                # if the client sends the same key with different items (a
+                # stale key surviving a failed/timed-out checkout that never
+                # got to clear it, then reused for an unrelated later
+                # purchase), that's a genuine conflict, not something to
+                # silently honor by returning the old, unrelated order.
+                existing_ids = self._order_item_transcript_ids(session, existing.id)
+                if set(existing_ids) != requested_id_set:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This checkout session is out of date. Please refresh and try again.",
+                    )
+                return self._existing_order_response(session, existing, existing_ids)
 
-            unique_ids = list(dict.fromkeys(transcript_ids))
             transcripts = (
                 session.query(Transcript).filter(Transcript.id.in_(unique_ids), Transcript.is_active.is_(True)).all()
             )
@@ -79,7 +106,6 @@ class OrdersHandler:
 
             # Reuse an already-open order for the same items - guards against
             # duplicate checkouts even with a different idempotency key (e.g. refresh).
-            target_id_set = set(unique_ids)
             open_orders = (
                 session.query(Order)
                 .filter(Order.user_id == user_id, Order.status == OrderStatus.CREATED.value)
@@ -87,12 +113,9 @@ class OrdersHandler:
                 .all()
             )
             for candidate in open_orders:
-                candidate_id_set = {
-                    row[0]
-                    for row in session.query(OrderItem.transcript_id).filter(OrderItem.order_id == candidate.id).all()
-                }
-                if candidate_id_set == target_id_set:
-                    return self._existing_order_response(session, candidate)
+                candidate_ids = self._order_item_transcript_ids(session, candidate.id)
+                if set(candidate_ids) == requested_id_set:
+                    return self._existing_order_response(session, candidate, candidate_ids)
 
             amount = sum(t.price for t in transcripts)
             currency = self.payment_service.currency
@@ -151,7 +174,7 @@ class OrdersHandler:
                     )
                     return self._existing_order_response(session, existing)
 
-                self._email_invoice_best_effort(session, order)
+                self._schedule_invoice_email(background_tasks, order.id)
                 return FreeOrderResponse(
                     orderId=str(order.id), status=order.status, transcriptIds=unique_ids, amount=0
                 )
@@ -234,9 +257,20 @@ class OrdersHandler:
         user = session.query(User).filter(User.id == order.user_id).first()
         return rows, user
 
-    def _email_invoice_best_effort(self, session, order: Order) -> None:
-        # Runs after the paid-transition is committed - email failure can't affect it.
+    def _email_invoice_best_effort(self, order_id: uuid.UUID) -> None:
+        # Scheduled as a background task (FastAPI's BackgroundTasks) to run
+        # after the response is already sent, not awaited inline - PDF
+        # generation plus a SendGrid call carrying that PDF attachment is
+        # slow (the plain-text OTP emails alone already ran ~7-9s; this is
+        # heavier), and none of it has anything to do with whether the
+        # paid-transition itself succeeded, which is already committed by
+        # this point. Because it runs after the request's own session has
+        # closed, it opens its own rather than reusing the caller's.
+        session = get_session()
         try:
+            order = session.query(Order).filter(Order.id == order_id).first()
+            if order is None:
+                return
             receipt = session.query(Receipt).filter(Receipt.order_id == order.id).first()
             if receipt is None:
                 return
@@ -244,10 +278,17 @@ class OrdersHandler:
             pdf_bytes = generate_receipt_pdf(order, rows, user, receipt.invoice_number)
             send_invoice_email(user.email, user.name, receipt.invoice_number, pdf_bytes)
         except Exception:
-            logger.exception("Failed to email invoice for order %s", order.id)
+            logger.exception("Failed to email invoice for order %s", order_id)
+        finally:
+            session.close()
 
     def verify_payment(
-        self, user_id: uuid.UUID, razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str
+        self,
+        user_id: uuid.UUID,
+        razorpay_order_id: str,
+        razorpay_payment_id: str,
+        razorpay_signature: str,
+        background_tasks: BackgroundTasks,
     ) -> VerifyPaymentResponse:
         session = get_session()
         try:
@@ -275,7 +316,7 @@ class OrdersHandler:
 
             session.refresh(order)
             if just_paid:
-                self._email_invoice_best_effort(session, order)
+                self._schedule_invoice_email(background_tasks, order.id)
             return VerifyPaymentResponse(orderId=str(order.id), status=order.status)
         except HTTPException:
             raise
@@ -286,7 +327,9 @@ class OrdersHandler:
         finally:
             session.close()
 
-    def handle_webhook(self, gateway: str, raw_body: bytes, signature: str, event_id: str) -> None:
+    def handle_webhook(
+        self, gateway: str, raw_body: bytes, signature: str, event_id: str, background_tasks: BackgroundTasks
+    ) -> None:
         if gateway != "razorpay":
             raise HTTPException(status_code=404, detail="Unknown payment gateway")
 
@@ -334,7 +377,7 @@ class OrdersHandler:
             session.commit()
 
             if just_paid:
-                self._email_invoice_best_effort(session, order)
+                self._schedule_invoice_email(background_tasks, order.id)
         except HTTPException:
             raise
         except Exception:
@@ -345,9 +388,19 @@ class OrdersHandler:
             session.close()
 
     def list_orders(self, user_id: uuid.UUID) -> list[OrderSummary]:
+        # Only paid orders - this backs "my orders" (purchase history), where
+        # a still-pending or failed checkout attempt isn't a purchase yet and
+        # has nothing useful to show. Filtering here means every caller gets
+        # the same correct list already, instead of each one re-implementing
+        # "ignore anything that isn't paid" client-side.
         session = get_session()
         try:
-            orders = session.query(Order).filter(Order.user_id == user_id).order_by(Order.created_at.desc()).all()
+            orders = (
+                session.query(Order)
+                .filter(Order.user_id == user_id, Order.status == OrderStatus.PAID.value)
+                .order_by(Order.created_at.desc())
+                .all()
+            )
             order_ids = [o.id for o in orders]
             items_by_order: dict[uuid.UUID, list[uuid.UUID]] = {}
             if order_ids:
@@ -384,9 +437,7 @@ class OrdersHandler:
             order = session.query(Order).filter(Order.id == order_id, Order.user_id == user_id).first()
             if order is None:
                 raise HTTPException(status_code=404, detail="Order not found")
-            transcript_ids = [
-                row[0] for row in session.query(OrderItem.transcript_id).filter(OrderItem.order_id == order.id).all()
-            ]
+            transcript_ids = self._order_item_transcript_ids(session, order.id)
             return OrderSummary(
                 id=str(order.id),
                 transcripts=transcript_ids,
