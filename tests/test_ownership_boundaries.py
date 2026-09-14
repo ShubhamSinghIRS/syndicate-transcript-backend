@@ -35,27 +35,27 @@ def test_random_user_cannot_access_another_users_data(client, monkeypatch, engin
 
     # 1. Transcript content - attacker never purchased this, must be blocked
     # even though they have a completely valid token for their own account.
-    resp = client.get(f"/api/transcripts/{transcript_id}/full-text", headers=attacker_headers)
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/full-text", headers=attacker_headers)
     assert resp.status_code == 403, resp.text
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/download", headers=attacker_headers)
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/download", headers=attacker_headers)
     assert resp.status_code == 403, resp.text
 
     # 2. Victim's order - by ID, list, and receipt.
-    resp = client.get(f"/api/orders/{victim_order_id}", headers=attacker_headers)
+    resp = client.get(f"/api/v1/orders/{victim_order_id}", headers=attacker_headers)
     assert resp.status_code == 404, resp.text
 
-    resp = client.get(f"/api/orders/{victim_order_id}/receipt", headers=attacker_headers)
+    resp = client.get(f"/api/v1/orders/{victim_order_id}/receipt", headers=attacker_headers)
     assert resp.status_code == 404, resp.text
 
-    resp = client.get("/api/orders", headers=attacker_headers)
+    resp = client.get("/api/v1/orders", headers=attacker_headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"] == []  # attacker's own order list, not the victim's
 
     # 3. Victim's purchase can't be verified again by the attacker to try to
     # confirm/hijack it onto their own account.
     resp = client.post(
-        "/api/orders/verify",
+        "/api/v1/orders/verify",
         json={
             "razorpay_order_id": razorpay_order_id,
             "razorpay_payment_id": "pay_1",
@@ -66,7 +66,7 @@ def test_random_user_cannot_access_another_users_data(client, monkeypatch, engin
     assert resp.status_code == 404, resp.text
 
     # 4. "My purchased" must reflect the attacker's own entitlements only.
-    resp = client.get("/api/transcripts/me/purchased", headers=attacker_headers)
+    resp = client.get("/api/v1/transcripts/me/purchased", headers=attacker_headers)
     assert resp.status_code == 200, resp.text
     purchased_ids = [item["id"] for item in resp.json()["data"]["items"]]
     assert transcript_id not in purchased_ids
@@ -75,8 +75,8 @@ def test_random_user_cannot_access_another_users_data(client, monkeypatch, engin
     # this for their own data, so the blocks above are ownership checks, not
     # some unrelated failure making every one of these calls fail for anyone.
     victim_headers = _auth_headers(victim_token)
-    assert client.get(f"/api/transcripts/{transcript_id}/full-text", headers=victim_headers).status_code == 200
-    assert client.get(f"/api/orders/{victim_order_id}", headers=victim_headers).status_code == 200
-    assert client.get(f"/api/orders/{victim_order_id}/receipt", headers=victim_headers).status_code == 200
-    victim_purchased = client.get("/api/transcripts/me/purchased", headers=victim_headers)
+    assert client.get(f"/api/v1/transcripts/{transcript_id}/full-text", headers=victim_headers).status_code == 200
+    assert client.get(f"/api/v1/orders/{victim_order_id}", headers=victim_headers).status_code == 200
+    assert client.get(f"/api/v1/orders/{victim_order_id}/receipt", headers=victim_headers).status_code == 200
+    victim_purchased = client.get("/api/v1/transcripts/me/purchased", headers=victim_headers)
     assert transcript_id in [item["id"] for item in victim_purchased.json()["data"]["items"]]

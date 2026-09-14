@@ -22,7 +22,7 @@ def _resolve_guest_id(request: Request, response: Response) -> str:
     if existing:
         return existing
     new_id = secrets.token_urlsafe(24)
-    set_guest_cart_cookie(response, new_id, get_settings().auth.cookie_secure)
+    set_guest_cart_cookie(response, new_id, get_settings().auth.cookie_secure, P.cart.BASE)
     return new_id
 
 
@@ -42,8 +42,8 @@ def add_cart_item(
 ):
     verify_same_origin(request)
     guest_id = None if user_id else _resolve_guest_id(request, response)
-    result = cart_controller.add_item(user_id, guest_id, body.transcriptId)
-    return success_response(data=result)
+    cart_controller.add_item(user_id, guest_id, body.transcriptId)
+    return success_response(message="Item added to cart.")
 
 
 @router.delete(P.cart.ITEM_DETAIL)
@@ -55,8 +55,8 @@ def remove_cart_item(
 ):
     verify_same_origin(request)
     guest_id = None if user_id else _resolve_guest_id(request, response)
-    result = cart_controller.remove_item(user_id, guest_id, transcript_id)
-    return success_response(data=result)
+    cart_controller.remove_item(user_id, guest_id, transcript_id)
+    return success_response(message="Item removed from cart.")
 
 
 @router.delete(P.cart.ROOT)
@@ -78,5 +78,5 @@ def merge_cart(
     guest_id = request.cookies.get(GUEST_CART_COOKIE_NAME)  # read-only, never created here
     result = cart_controller.merge_cart(user_id, guest_id, body.items)
     if guest_id:
-        clear_guest_cart_cookie(response, get_settings().auth.cookie_secure)
+        clear_guest_cart_cookie(response, get_settings().auth.cookie_secure, P.cart.BASE)
     return success_response(data=result)

@@ -1,4 +1,5 @@
 import hmac
+import time
 import uuid
 
 from fastapi import Header, HTTPException, Request
@@ -37,6 +38,16 @@ def get_current_user_id_optional(request: Request) -> uuid.UUID | None:
 def get_current_user_email(request: Request) -> str | None:
     """Email claim from the JWT, attached by the JWT middleware."""
     return getattr(request.state, "email", None)
+
+
+def get_access_token_expires_in(request: Request) -> int:
+    """Seconds left on the current access token, from its own `exp` claim -
+    lets the frontend schedule a proactive refresh before it actually expires
+    instead of only reacting after a request 401s."""
+    exp = getattr(request.state, "access_token_exp", None)
+    if not exp:
+        return 0
+    return max(0, int(exp - time.time()))
 
 
 _orders_controller: OrdersController | None = None

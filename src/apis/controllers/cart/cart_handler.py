@@ -63,7 +63,10 @@ def handle_get_cart(user_id: uuid.UUID | None, guest_id: str | None) -> CartResp
         session.close()
 
 
-def handle_add_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_id: uuid.UUID) -> CartResponse:
+def handle_add_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_id: uuid.UUID) -> None:
+    # The caller already has the full transcript details client-side (it's
+    # the same object rendered on the page) - no need to re-query and return
+    # the whole cart just to confirm "done", same as handle_remove_item.
     if user_id is None and not guest_id:
         raise HTTPException(status_code=400, detail="A guest cart identity is required.")
 
@@ -84,7 +87,6 @@ def handle_add_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_
         except IntegrityError:
             # Already in the cart - idempotent no-op, not an error.
             session.rollback()
-        return _cart_response(session, cart)
     except HTTPException:
         raise
     except Exception:
@@ -95,7 +97,9 @@ def handle_add_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_
         session.close()
 
 
-def handle_remove_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_id: uuid.UUID) -> CartResponse:
+def handle_remove_item(user_id: uuid.UUID | None, guest_id: str | None, transcript_id: uuid.UUID) -> None:
+    # The caller already knows which single item it removed - no need to
+    # re-query and return the whole remaining cart just to say "done".
     session = get_session()
     try:
         cart = _get_cart(session, user_id, guest_id, create=False)
@@ -104,7 +108,6 @@ def handle_remove_item(user_id: uuid.UUID | None, guest_id: str | None, transcri
                 CartItem.cart_id == cart.id, CartItem.transcript_id == transcript_id
             ).delete()
             session.commit()
-        return _cart_response(session, cart)
     except HTTPException:
         raise
     except Exception:

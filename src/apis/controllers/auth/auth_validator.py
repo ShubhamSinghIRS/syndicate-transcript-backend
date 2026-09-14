@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 
-MIN_PASSWORD_LENGTH = 10
+MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 72  # bcrypt silently truncates beyond this - reject rather than accept dead weight
 
 # Not exhaustive - a cheap denylist for the most egregiously common passwords,

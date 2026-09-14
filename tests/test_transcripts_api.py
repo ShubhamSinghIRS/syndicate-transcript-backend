@@ -13,14 +13,14 @@ def _signup_and_verify(client, monkeypatch, email="reader@example.com", password
     monkeypatch.setattr("apis.controllers.auth.auth_handler.send_registration_otp", fake_send_otp)
 
     resp = client.post(
-        "/api/auth/register",
+        "/api/v1/auth/register",
         json={"name": name, "email": email, "password": password, "companyName": "Acme Inc"},
     )
     assert resp.status_code == 200, resp.text
     pending_token = resp.json()["data"]["tempToken"]
 
     verify_resp = client.post(
-        "/api/auth/register/verify-otp", json={"tempToken": pending_token, "otp": captured["otp"]}
+        "/api/v1/auth/register/verify-otp", json={"tempToken": pending_token, "otp": captured["otp"]}
     )
     assert verify_resp.status_code == 200, verify_resp.text
     body = verify_resp.json()["data"]
@@ -105,12 +105,12 @@ def _auth_headers(token: str) -> dict:
 
 
 def test_list_transcripts_is_public(client):
-    resp = client.get("/api/transcripts")
+    resp = client.get("/api/v1/transcripts")
     assert resp.status_code == 200, resp.text
 
 
 def test_domains_is_public(client):
-    resp = client.get("/api/transcripts/domains")
+    resp = client.get("/api/v1/transcripts/domains")
     assert resp.status_code == 200, resp.text
 
 
@@ -120,7 +120,7 @@ def test_list_transcripts_includes_all_schema_fields(client, engine):
         engine, author_id, final_transcript={"url": "s3://bucket/real.pdf", "filename": "real.pdf"}
     )
 
-    resp = client.get("/api/transcripts?limit=20")
+    resp = client.get("/api/v1/transcripts?limit=20")
     assert resp.status_code == 200, resp.text
     item = next(i for i in resp.json()["data"]["items"] if i["id"] == transcript_id)
 
@@ -138,7 +138,7 @@ def test_detail_is_public(client, engine):
     author_id = _seed_author(engine)
     transcript_id = _seed_transcript(engine, author_id)
 
-    resp = client.get(f"/api/transcripts/{transcript_id}")
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert "isPurchased" not in data
@@ -150,15 +150,15 @@ def test_detail_with_invalid_token_still_works(client, engine):
     transcript_id = _seed_transcript(engine, author_id)
 
     resp = client.get(
-        f"/api/transcripts/{transcript_id}", headers={"Authorization": "Bearer not-a-real-token"}
+        f"/api/v1/transcripts/{transcript_id}", headers={"Authorization": "Bearer not-a-real-token"}
     )
     assert resp.status_code == 200, resp.text
 
 
 def test_my_purchased_requires_auth(client):
-    # Shares the /api/transcripts prefix with the public list/detail routes
+    # Shares the /api/v1/transcripts prefix with the public list/detail routes
     # but must stay hard-protected.
-    resp = client.get("/api/transcripts/me/purchased")
+    resp = client.get("/api/v1/transcripts/me/purchased")
     assert resp.status_code == 401
 
 
@@ -166,10 +166,10 @@ def test_view_and_download_require_auth(client, engine):
     author_id = _seed_author(engine)
     transcript_id = _seed_transcript(engine, author_id)
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/view")
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/view")
     assert resp.status_code == 401
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/download")
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/download")
     assert resp.status_code == 401
 
 
@@ -178,10 +178,10 @@ def test_view_and_download_require_purchase(client, monkeypatch, engine):
     author_id = _seed_author(engine)
     transcript_id = _seed_transcript(engine, author_id)
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/view", headers=_auth_headers(token))
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/view", headers=_auth_headers(token))
     assert resp.status_code == 403
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/download", headers=_auth_headers(token))
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/download", headers=_auth_headers(token))
     assert resp.status_code == 403
 
 
@@ -195,7 +195,7 @@ def test_view_still_not_implemented_after_purchase(client, monkeypatch, engine):
     transcript_id = _seed_transcript(engine, author_id)
     _grant_transcript_access(engine, user_id, transcript_id)
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/view", headers=_auth_headers(token))
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/view", headers=_auth_headers(token))
     assert resp.status_code == 501
 
 
@@ -205,13 +205,13 @@ def test_full_text_and_download_work_after_purchase(client, monkeypatch, engine)
     transcript_id = _seed_transcript(engine, author_id)
     _grant_transcript_access(engine, user_id, transcript_id)
 
-    full_text_resp = client.get(f"/api/transcripts/{transcript_id}/full-text", headers=_auth_headers(token))
+    full_text_resp = client.get(f"/api/v1/transcripts/{transcript_id}/full-text", headers=_auth_headers(token))
     assert full_text_resp.status_code == 200, full_text_resp.text
     full_text = full_text_resp.json()["data"]["fullText"]
     assert "Enterprise AI Integration" in full_text  # default _seed_transcript topic
 
     # No signing service configured in tests -> dev-mode placeholder PDF, not a redirect.
-    download_resp = client.get(f"/api/transcripts/{transcript_id}/download", headers=_auth_headers(token))
+    download_resp = client.get(f"/api/v1/transcripts/{transcript_id}/download", headers=_auth_headers(token))
     assert download_resp.status_code == 200, download_resp.text
     assert download_resp.headers["content-type"] == "application/pdf"
     assert download_resp.content[:4] == b"%PDF"
@@ -222,10 +222,10 @@ def test_full_text_and_download_require_purchase(client, monkeypatch, engine):
     author_id = _seed_author(engine)
     transcript_id = _seed_transcript(engine, author_id)
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/full-text", headers=_auth_headers(token))
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/full-text", headers=_auth_headers(token))
     assert resp.status_code == 403
 
-    resp = client.get(f"/api/transcripts/{transcript_id}/download", headers=_auth_headers(token))
+    resp = client.get(f"/api/v1/transcripts/{transcript_id}/download", headers=_auth_headers(token))
     assert resp.status_code == 403
 
 
@@ -234,7 +234,7 @@ def test_domain_filter_matches_via_array_containment(client, engine):
     multi_domain_id = _seed_transcript(engine, author_id, domain=["Fintech Payments", "Cybersecurity Operations"])
     _seed_transcript(engine, author_id, domain=["Retail Customer Experience"])
 
-    resp = client.get("/api/transcripts?domain=Cybersecurity%20Operations")
+    resp = client.get("/api/v1/transcripts?domain=Cybersecurity%20Operations")
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -247,7 +247,7 @@ def test_domains_endpoint_returns_flattened_distinct_list(client, engine):
     _seed_transcript(engine, author_id, domain=["Fintech Payments", "Cybersecurity Operations"])
     _seed_transcript(engine, author_id, domain=["Cybersecurity Operations", "Retail Customer Experience"])
 
-    resp = client.get("/api/transcripts/domains")
+    resp = client.get("/api/v1/transcripts/domains")
     assert resp.status_code == 200, resp.text
     domains = resp.json()["data"]
     assert domains == ["Cybersecurity Operations", "Fintech Payments", "Retail Customer Experience"]
@@ -260,7 +260,7 @@ def test_my_purchased_only_returns_entitled_transcripts(client, monkeypatch, eng
     _seed_transcript(engine, author_id)  # not purchased
     _grant_transcript_access(engine, user_id, purchased_id)
 
-    resp = client.get("/api/transcripts/me/purchased", headers=_auth_headers(token))
+    resp = client.get("/api/v1/transcripts/me/purchased", headers=_auth_headers(token))
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -268,7 +268,7 @@ def test_my_purchased_only_returns_entitled_transcripts(client, monkeypatch, eng
 
 
 def test_filter_is_public(client):
-    resp = client.post("/api/transcripts/filter", json={})
+    resp = client.post("/api/v1/transcripts/filter", json={})
     assert resp.status_code == 200, resp.text
 
 
@@ -277,7 +277,7 @@ def test_filter_by_domain_matches_via_array_overlap(client, engine):
     match_id = _seed_transcript(engine, author_id, domain=["Fintech Payments", "Cybersecurity Operations"])
     _seed_transcript(engine, author_id, domain=["Retail Customer Experience"])
 
-    resp = client.post("/api/transcripts/filter", json={"domain": ["Fintech Payments", "HR Tech"]})
+    resp = client.post("/api/v1/transcripts/filter", json={"domain": ["Fintech Payments", "HR Tech"]})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -289,7 +289,7 @@ def test_filter_by_geography(client, engine):
     match_id = _seed_transcript(engine, author_id, geography=["Europe"])
     _seed_transcript(engine, author_id, geography=["South Asia"])
 
-    resp = client.post("/api/transcripts/filter", json={"geography": ["Europe"]})
+    resp = client.post("/api/v1/transcripts/filter", json={"geography": ["Europe"]})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -301,7 +301,7 @@ def test_filter_by_topic_substring_case_insensitive(client, engine):
     match_id = _seed_transcript(engine, author_id, topic="Cloud Cost Optimization deep dive")
     _seed_transcript(engine, author_id, topic="Something unrelated")
 
-    resp = client.post("/api/transcripts/filter", json={"topic": "cloud cost"})
+    resp = client.post("/api/v1/transcripts/filter", json={"topic": "cloud cost"})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -314,13 +314,13 @@ def test_filter_by_search_matches_topic_or_geography(client, engine):
     geography_match_id = _seed_transcript(engine, author_id, topic="Unrelated topic", geography=["APAC"])
     _seed_transcript(engine, author_id, topic="Something else", geography=["South Asia"])
 
-    resp = client.post("/api/transcripts/filter", json={"search": "cloud"})
+    resp = client.post("/api/v1/transcripts/filter", json={"search": "cloud"})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
     assert body["items"][0]["id"] == topic_match_id
 
-    resp = client.post("/api/transcripts/filter", json={"search": "APAC"})
+    resp = client.post("/api/v1/transcripts/filter", json={"search": "APAC"})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -332,11 +332,29 @@ def test_filter_by_price_range(client, engine):
     cheap_id = _seed_transcript(engine, author_id, price=10)
     _seed_transcript(engine, author_id, price=500)
 
-    resp = client.post("/api/transcripts/filter", json={"minPrice": 5, "maxPrice": 50})
+    resp = client.post(
+        "/api/v1/transcripts/filter", json={"priceRanges": [{"minPrice": 5, "maxPrice": 50}]}
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
     assert body["items"][0]["id"] == cheap_id
+
+
+def test_filter_by_multiple_disjoint_price_ranges_does_not_include_the_gap(client, engine):
+    author_id = _seed_author(engine)
+    free_id = _seed_transcript(engine, author_id, price=0)
+    _seed_transcript(engine, author_id, price=100)  # the gap - must be excluded
+    high_id = _seed_transcript(engine, author_id, price=300)
+
+    resp = client.post(
+        "/api/v1/transcripts/filter",
+        json={"priceRanges": [{"minPrice": 0, "maxPrice": 0}, {"minPrice": 200, "maxPrice": 400}]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()["data"]
+    returned_ids = {item["id"] for item in body["items"]}
+    assert returned_ids == {free_id, high_id}
 
 
 def test_filter_by_author_id(client, engine):
@@ -345,7 +363,7 @@ def test_filter_by_author_id(client, engine):
     match_id = _seed_transcript(engine, author_a)
     _seed_transcript(engine, author_b)
 
-    resp = client.post("/api/transcripts/filter", json={"authorId": author_a})
+    resp = client.post("/api/v1/transcripts/filter", json={"authorId": author_a})
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body["meta"]["total"] == 1
@@ -361,7 +379,7 @@ def test_filter_combines_multiple_criteria_and_paginates(client, engine):
     _seed_transcript(engine, author_id, domain=["HR Tech"], geography=["Europe"], price=100)
 
     resp = client.post(
-        "/api/transcripts/filter",
+        "/api/v1/transcripts/filter",
         json={"domain": ["Fintech Payments"], "geography": ["Europe"], "page": 1, "limit": 5},
     )
     assert resp.status_code == 200, resp.text

@@ -9,9 +9,23 @@ from services.crypto.email_crypto import hash_email
 from services.database.postgres.connection import get_session
 from utils.pagination import Page, PaginationParams, build_page, paginate
 
-from .inquiries_schema import SupportMessagePayload, TopicRequestListItem, TopicRequestPayload
+from .inquiries_schema import (
+    SupportMessagePayload,
+    TopicRequestDetailResponse,
+    TopicRequestListItem,
+    TopicRequestPayload,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _topic_request_owner_match(user_id: uuid.UUID, email: str | None):
+    # Also match by email so a request made anonymously (before signing up
+    # or while logged out) shows up once the same email is logged in.
+    owner_match = TopicRequest.user_id == user_id
+    if email:
+        owner_match = or_(owner_match, TopicRequest.email_hash == hash_email(email))
+    return owner_match
 
 
 def handle_submit_support_message(
@@ -71,12 +85,7 @@ def handle_list_my_topic_requests(
 ) -> Page:
     session = get_session()
     try:
-        # Also match by email so a request made anonymously (before signing up
-        # or while logged out) shows up once the same email is logged in.
-        owner_match = TopicRequest.user_id == user_id
-        if email:
-            owner_match = or_(owner_match, TopicRequest.email_hash == hash_email(email))
-        query = session.query(TopicRequest).filter(owner_match)
+        query = session.query(TopicRequest).filter(_topic_request_owner_match(user_id, email))
         if search:
             term = f"%{search}%"
             domains_text = func.array_to_string(TopicRequest.domains, ", ")
@@ -100,6 +109,39 @@ def handle_list_my_topic_requests(
     except Exception:
         session.rollback()
         logger.exception("Failed to list topic requests")
+        raise HTTPException(status_code=500, detail="Internal error") from None
+    finally:
+        session.close()
+
+
+def handle_get_my_topic_request_detail(
+    user_id: uuid.UUID, email: str | None, request_id: uuid.UUID
+) -> TopicRequestDetailResponse:
+    session = get_session()
+    try:
+        # Same ownership match as the list endpoint - a request made
+        # anonymously (before signing up or while logged out) is reachable
+        # once the same email is logged in. Not found (not 403) either way,
+        # so a non-owner can't use this to confirm the id exists.
+        owner_match = _topic_request_owner_match(user_id, email)
+        row = session.query(TopicRequest).filter(TopicRequest.id == request_id, owner_match).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Topic request not found")
+        return TopicRequestDetailResponse(
+            id=row.id,
+            topic=row.topic,
+            domains=row.domains,
+            status=row.status,
+            createdAt=row.created_at,
+            remark=row.remark,
+            suggestedExpertName=row.suggested_expert_name,
+            suggestedExpertLinkedin=row.suggested_expert_linkedin,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to fetch topic request detail")
         raise HTTPException(status_code=500, detail="Internal error") from None
     finally:
         session.close()
