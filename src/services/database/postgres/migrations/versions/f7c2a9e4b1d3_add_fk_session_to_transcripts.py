@@ -23,8 +23,20 @@ def upgrade() -> None:
     # publish endpoint upserts on (INSERT ... ON CONFLICT (fk_session) DO UPDATE).
     # Nullable so any pre-existing rows (which predate this integration) stay valid;
     # UNIQUE so a re-publish updates the same row instead of inserting a duplicate.
-    op.add_column('transcripts', sa.Column('fk_session', sa.BigInteger(), nullable=True))
-    op.create_unique_constraint('uq_transcripts_fk_session', 'transcripts', ['fk_session'])
+    #
+    # Guarded like 3970e3b6a3d1: 8a88c8e366e2 rebuilds transcripts via
+    # Base.metadata.create_all against live models, so on a database migrated
+    # from scratch today, fk_session (and its unique constraint) already exists
+    # by the time this migration runs.
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = {col["name"] for col in inspector.get_columns("transcripts")}
+    unique_constraints = inspector.get_unique_constraints("transcripts")
+
+    if "fk_session" not in columns:
+        op.add_column('transcripts', sa.Column('fk_session', sa.BigInteger(), nullable=True))
+    if not any(uq["column_names"] == ["fk_session"] for uq in unique_constraints):
+        op.create_unique_constraint('uq_transcripts_fk_session', 'transcripts', ['fk_session'])
 
 
 def downgrade() -> None:

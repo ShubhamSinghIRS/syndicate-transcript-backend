@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: syndicate-postgres-dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Dev convenience: reachable from the host so you can point a local DB
+    # client (TablePlus, DBeaver, psql) straight at it. Prod deliberately
+    # does not do this.
+    ports:
+      - "5432:5432"
+    networks:
+      - backend-dev
+
+  backend:
+    build:
+      context: .
+      args:
+        CACHEBUST: ${CACHEBUST:-0}
+    container_name: syndicate-backend-dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Same host port as the prod compose file (docker-compose.yml) - fine
+    # since normally only one stack runs at a time on a given machine. If you
+    # ever need both up simultaneously, remap one of them, e.g. "8001:8000".
+    ports:
+      - "8000:8000"
+    networks:
+      - backend-dev
+
+volumes:
+  pgdata_dev:
+
+networks:
+  backend-dev:

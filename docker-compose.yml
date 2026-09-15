@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: syndicate-postgres
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published to the host on purpose - only the backend container can
+    # reach it, over the internal compose network. Uncomment to allow access
+    # from your own machine (e.g. via an SSH tunnel) for debugging with a
+    # DB client:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    networks:
+      - backend
+
+  backend:
+    build:
+      context: .
+      args:
+        CACHEBUST: ${CACHEBUST:-0}
+    container_name: syndicate-backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+volumes:
+  # Plain Docker volume - not a hard-enforced 10GB quota (overlay2 doesn't
+  # support per-volume size limits). Treat 10GB as the operational budget for
+  # this database and check real usage with:
+  #   docker exec syndicate-postgres du -sh /var/lib/postgresql/data
+  pgdata:
+
+networks:
+  backend:
