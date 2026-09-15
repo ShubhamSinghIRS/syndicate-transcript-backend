@@ -46,7 +46,11 @@ def upgrade() -> None:
     conn = op.get_bind()
     for table in _TABLES:
         op.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
-    Base.metadata.create_all(bind=conn)
+    # Scoped to _TABLES only - Base.metadata also includes tables added by
+    # later migrations (e.g. transcript_filter_bounds), which would otherwise
+    # get created here too and collide with their own explicit CREATE TABLE
+    # when replaying the full history against a fresh database.
+    Base.metadata.create_all(bind=conn, tables=[Base.metadata.tables[t] for t in _TABLES])
 
 
 def downgrade() -> None:

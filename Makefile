@@ -5,7 +5,7 @@ CONTAINER := syndicate-backend
 ENV_FILE := $(CURDIR)/.env.dev
 ENV_FILE_PROD := $(CURDIR)/.env.production
 
-.PHONY: build run-dev run-prod stop logs check-env check-env-prod
+.PHONY: build run-dev run-prod stop logs check-env check-env-prod compose-up compose-down compose-logs compose-dev-up compose-dev-down compose-dev-logs
 
 build:
 	docker build --build-arg CACHEBUST=$$(date +%s) -t $(IMAGE) .
@@ -38,3 +38,26 @@ stop:
 
 logs:
 	docker logs -f $(CONTAINER)
+
+# --- docker-compose: prod profile (backend + postgres, e.g. on the Linode server) ---
+
+# Rebuilds the backend image and (re)creates both containers as needed.
+compose-up: check-env-prod
+	docker compose up -d --build
+
+compose-down:
+	docker compose down
+
+compose-logs:
+	docker compose logs -f
+
+# --- docker-compose: dev profile (backend + its own postgres, for local testing) ---
+
+compose-dev-up: check-env
+	docker compose -f docker-compose.dev.yml up -d --build
+
+compose-dev-down:
+	docker compose -f docker-compose.dev.yml down
+
+compose-dev-logs:
+	docker compose -f docker-compose.dev.yml logs -f
