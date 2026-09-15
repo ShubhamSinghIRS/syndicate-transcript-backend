@@ -6,7 +6,7 @@ services:
     env_file:
       - .env.production
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - /mnt/postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -18,6 +18,17 @@ services:
     # DB client:
     # ports:
     #   - "127.0.0.1:5432:5432"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 512m
     networks:
       - backend
 
@@ -33,17 +44,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Loopback only - the internet can never reach this port directly.
+    # Host Nginx proxies to it and is the only public listener (port 443).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
     networks:
       - backend
-
-volumes:
-  # Plain Docker volume - not a hard-enforced 10GB quota (overlay2 doesn't
-  # support per-volume size limits). Treat 10GB as the operational budget for
-  # this database and check real usage with:
-  #   docker exec syndicate-postgres du -sh /var/lib/postgresql/data
-  pgdata:
 
 networks:
   backend:
