@@ -191,7 +191,11 @@ def handle_list_domains() -> list[dict]:
             timeout=10,
         )
         response.raise_for_status()
-        return response.json().get("data", [])
+        data = response.json().get("data", [])
+        # Infollion includes placeholder rows for domains not yet named -
+        # "To Be Added", "To Be Added L0", "To Be Added L1", etc. - not
+        # meaningful to show/filter by on the frontend.
+        return [domain for domain in data if not str(domain.get("name", "")).startswith("To Be Added")]
     except HTTPException:
         raise
     except Exception:
