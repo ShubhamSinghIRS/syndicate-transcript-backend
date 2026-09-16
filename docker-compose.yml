@@ -1,5 +1,6 @@
 services:
   postgres:
+    profiles: ["prod"]
     image: postgres:16-alpine
     container_name: syndicate-postgres
     restart: unless-stopped
@@ -33,6 +34,7 @@ services:
       - backend
 
   backend:
+    profiles: ["prod"]
     build:
       context: .
       args:
@@ -53,6 +55,49 @@ services:
     mem_limit: 512m
     networks:
       - backend
+
+  postgres-dev:
+    profiles: ["dev"]
+    image: postgres:16-alpine
+    container_name: syndicate-postgres-dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Dev convenience: reachable from the host so you can point a local DB
+    # client (TablePlus, DBeaver, psql) straight at it. Prod deliberately
+    # does not do this.
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+
+  backend-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      args:
+        CACHEBUST: ${CACHEBUST:-0}
+    container_name: syndicate-backend-dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    depends_on:
+      postgres-dev:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+volumes:
+  pgdata_dev:
 
 networks:
   backend:
