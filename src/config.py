@@ -109,6 +109,18 @@ class StorageConfig:
 
 
 @dataclass
+class DomainsApiConfig:
+    # Infollion's domains list endpoint (server-to-server, x-api-key auth).
+    # We proxy its raw response straight through to our frontend.
+    base_url: str
+    api_key: str
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.base_url and self.api_key)
+
+
+@dataclass
 class IngestConfig:
     # Shared secret for the Infollion backend's server-to-server transcript ingest
     # (POST/PATCH /api/internal/transcripts). Must match Infollion's SYNDICATE_SERVICE_API_KEY.
@@ -130,6 +142,7 @@ class Settings:
     payment: PaymentConfig
     ingest: IngestConfig
     storage: StorageConfig
+    domains_api: DomainsApiConfig
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -183,6 +196,14 @@ class Settings:
                 region=get_env("LINODE_REGION", default="", required=False),
                 bucket=get_env("LINODE_BUCKET", default="", required=False),
                 endpoint=get_env("LINODE_ENDPOINT", default="", required=False),
+            ),
+            domains_api=DomainsApiConfig(
+                base_url=get_env(
+                    "INFOLLION_DOMAINS_API_URL",
+                    default="https://sandbox.infollion.com/api/v1/domains",
+                    required=False,
+                ),
+                api_key=get_env("INFOLLION_API_KEY", default="", required=False),
             ),
         )
 

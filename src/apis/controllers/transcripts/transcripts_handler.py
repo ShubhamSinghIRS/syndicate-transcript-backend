@@ -2,6 +2,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import and_, case, desc, func, literal, literal_column, or_, text
 
@@ -178,26 +179,24 @@ def handle_list_purchased_transcripts(user_id: uuid.UUID, params: PaginationPara
         session.close()
 
 
-def handle_list_domains() -> list[str]:
-    session = get_session()
+def handle_list_domains() -> list[dict]:
+    settings = get_settings().domains_api
+    if not settings.is_configured:
+        raise HTTPException(status_code=500, detail="Domains API is not configured.")
+
     try:
-        unnested = func.unnest(Transcript.domains).label("domain")
-        rows = (
-            session.query(unnested)
-            .filter(Transcript.is_active.is_(True), Transcript.domains.isnot(None))
-            .distinct()
-            .order_by(unnested)
-            .all()
+        response = httpx.get(
+            settings.base_url,
+            headers={"x-api-key": settings.api_key},
+            timeout=10,
         )
-        return [row[0] for row in rows]
+        response.raise_for_status()
+        return response.json().get("data", [])
     except HTTPException:
         raise
     except Exception:
-        session.rollback()
-        logger.exception("Failed to list transcript domains")
-        raise HTTPException(status_code=500, detail="Internal error") from None
-    finally:
-        session.close()
+        logger.exception("Failed to fetch domains from Infollion API")
+        raise HTTPException(status_code=502, detail="Failed to fetch domains") from None
 
 
 def handle_get_filter_options() -> TranscriptFilterOptionsResponse:
