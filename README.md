@@ -47,4 +47,4 @@ The backend only listens on `127.0.0.1:8000` in the `prod` profile - put a rever
 
 Postgres data:
 - `dev` - a Docker-managed volume (`pgdata_dev`).
-- `prod` - bind-mounted to `/mnt/postgres-data` on the host. Create that path (and put it on its own sized volume if you want disk usage capped) before the first `make up ENV=prod`. Check actual usage with `docker exec syndicate-postgres du -sh /var/lib/postgresql/data`.
+- `prod` - bind-mounted to `/mnt/postgres-data/pgdata` on the host (nested under a subfolder rather than the mount root, so Postgres owns that directory outright and there's no permission mismatch with the mount point itself). Create the parent path (and put it on its own sized volume if you want disk usage capped) before the first `make up ENV=prod`. Check actual usage with `docker exec syndicate-postgres du -sh /var/lib/postgresql/data`.
