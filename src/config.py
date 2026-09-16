@@ -111,7 +111,8 @@ class StorageConfig:
 @dataclass
 class DomainsApiConfig:
     # Infollion's domains list endpoint (server-to-server, x-api-key auth).
-    # We proxy its raw response straight through to our frontend.
+    # We proxy its raw response straight through to our frontend. The api_key is the
+    # same SYNDICATE_INBOUND_API_KEY used for transcript ingest (single shared secret).
     base_url: str
     api_key: str
 
@@ -203,7 +204,9 @@ class Settings:
                     default="https://sandbox.infollion.com/api/v1/domains",
                     required=False,
                 ),
-                api_key=get_env("INFOLLION_API_KEY", default="", required=False),
+                # Same shared secret as the inbound transcript-ingest auth: one key
+                # (SYNDICATE_INBOUND_API_KEY) guards both directions of the S2S link.
+                api_key=get_env("SYNDICATE_INBOUND_API_KEY", default="", required=False),
             ),
         )
 
