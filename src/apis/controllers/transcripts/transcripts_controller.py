@@ -23,7 +23,7 @@ def list_purchased_transcripts(user_id: uuid.UUID, params: PaginationParams):
     return handler.handle_list_purchased_transcripts(user_id, params)
 
 
-def list_domains() -> list[str]:
+def list_domains() -> list[dict]:
     return handler.handle_list_domains()
 
 
