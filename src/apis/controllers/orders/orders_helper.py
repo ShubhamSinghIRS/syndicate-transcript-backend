@@ -59,6 +59,7 @@ def transition_to_paid(
                 "paid_at": paid_at,
             }
         )
+        session.query(OrderItem).filter(OrderItem.order_id == order.id).update({"access_permission": True})
         create_receipt(session, order, paid_at)
         clear_purchased_cart_items(session, order)
     return bool(rowcount)

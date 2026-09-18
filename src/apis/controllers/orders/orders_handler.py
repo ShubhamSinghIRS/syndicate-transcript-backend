@@ -215,6 +215,9 @@ class OrdersHandler:
                         transcript_id=transcript.id,
                         price=transcript.price,
                         currency=currency,
+                        # Order isn't paid yet at this point - don't rely on the
+                        # column default (true = has access) for a pending order.
+                        access_permission=False,
                     )
                 )
 
