@@ -47,7 +47,7 @@ def has_transcript_access(session, user_id: uuid.UUID | None, transcript_id: uui
         .filter(
             OrderItem.user_id == user_id,
             OrderItem.transcript_id == transcript_id,
-            OrderItem.access_permission.is_(False),
+            OrderItem.access_permission.is_(True),
             Order.status == OrderStatus.PAID.value,
         )
         .first()

@@ -160,7 +160,7 @@ def handle_list_purchased_transcripts(user_id: uuid.UUID, params: PaginationPara
             .join(Order, Order.id == OrderItem.order_id)
             .filter(
                 OrderItem.user_id == user_id,
-                OrderItem.access_permission.is_(False),
+                OrderItem.access_permission.is_(True),
                 Order.status == OrderStatus.PAID.value,
             )
             .distinct()

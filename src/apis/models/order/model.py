@@ -43,6 +43,6 @@ class OrderItem(Base):
     price = Column(Integer, nullable=False)
     currency = Column(String, nullable=False)
     access_permission = Column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )  # true = access revoked (renamed from "refunded")
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )  # true = has access, false = access revoked (renamed from "refunded")
     created_at = Column(DateTime, server_default=text("now()"), nullable=True)
